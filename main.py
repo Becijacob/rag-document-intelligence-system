@@ -9,11 +9,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
+# 🔹 Load env variables
 load_dotenv()
 
 app = FastAPI()
 
-# ✅ Enable CORS (frontend will call backend)
+# 🔹 Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,51 +23,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Request schema
+# 🔹 Request schema
 class QueryRequest(BaseModel):
     question: str
 
-# Global objects
+# 🔹 Global objects
 vectordb = None
 retriever = None
-llm = ChatOpenAI(model="gpt-4o-mini")
+llm = None
 
-# ✅ Root endpoint (health check)
+# 🔹 Root endpoint
 @app.get("/")
 def home():
     return {"message": "FastAPI RAG service is running"}
 
-# ✅ Load PDF at startup
+# 🔹 Debug endpoint
+@app.get("/check")
+def check_key():
+    key = os.getenv("OPENAI_API_KEY")
+    return {
+        "key_present": key is not None,
+        "key_length": len(key) if key else 0
+    }
+
+# 🔹 Startup loader
 @app.on_event("startup")
 def load_data():
-    global vectordb, retriever
+    global vectordb, retriever, llm
 
     try:
-        loader = PyPDFLoader("Cloud-Based Data Processing System Architecture.pdf")
+        print("🚀 Starting backend setup...")
+
+        # ✅ Check API Key
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ValueError("❌ OPENAI_API_KEY is missing in environment")
+
+        # ✅ Initialize LLM
+        llm = ChatOpenAI(model="gpt-4o-mini")
+
+        # ✅ Load PDF
+        pdf_path = "Cloud-Based Data Processing System Architecture.pdf"
+
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"❌ PDF not found: {pdf_path}")
+
+        loader = PyPDFLoader(pdf_path)
         documents = loader.load()
 
+        # ✅ Split documents
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=300,
             chunk_overlap=80
         )
         docs = splitter.split_documents(documents)
 
+        # ✅ Create embeddings + vector DB
         embedding = OpenAIEmbeddings()
         vectordb = Chroma.from_documents(docs, embedding)
 
+        # ✅ Create retriever
         retriever = vectordb.as_retriever(search_kwargs={"k": 8})
 
         print("✅ PDF loaded and vector DB ready")
 
     except Exception as e:
-        print("❌ Error:", str(e))
+        print("❌ Startup Error:", str(e))
+        retriever = None
+        llm = None
 
-# ✅ Main API endpoint
+# 🔹 Main API
 @app.post("/ask")
 def ask_question(req: QueryRequest):
-    global retriever
+    global retriever, llm
 
     try:
+        # ✅ Safety checks
+        if retriever is None:
+            return {"error": "Retriever not initialized. Check PDF loading."}
+
+        if llm is None:
+            return {"error": "LLM not initialized. Check API key."}
+
         # 🔥 Multi-query retrieval
         queries = [
             req.question,
@@ -81,12 +118,12 @@ def ask_question(req: QueryRequest):
             docs = retriever.invoke(q)
             all_docs.extend(docs)
 
-        # Remove duplicates
+        # ✅ Remove duplicates
         unique_docs = list({doc.page_content: doc for doc in all_docs}.values())
 
         context = "\n".join([doc.page_content for doc in unique_docs])
 
-        # 🔥 Strict grounding prompt
+        # 🔥 Prompt
         prompt = f"""
         You are a senior system architect.
 
@@ -106,7 +143,7 @@ def ask_question(req: QueryRequest):
 
         response = llm.invoke(prompt)
 
-        # Sources
+        # ✅ Sources
         pages = list(set([doc.metadata.get("page", 0) + 1 for doc in unique_docs]))
 
         return {
