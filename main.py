@@ -68,7 +68,7 @@ def load_data():
 
         pdf_path = os.path.join(
             BASE_DIR,
-            "Cloud-Based Data Processing System Architecture.pdf"
+            "Cloud_Based.pdf"
         )
 
         print("📂 Loading PDF from:", pdf_path)
