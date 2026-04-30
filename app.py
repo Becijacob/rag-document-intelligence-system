@@ -1,104 +1,83 @@
 import streamlit as st
 import requests
 
-# 🔹 Page config
+# 🔹 URLs
+API_URL = "https://rag-document-intelligence-system.onrender.com/ask"
+UPLOAD_URL = "https://rag-document-intelligence-system.onrender.com/upload"
+
 st.set_page_config(page_title="AI Document Assistant", layout="wide")
 
-# 🔹 Backend URL
-API_URL = "https://rag-document-intelligence-system.onrender.com/ask"
+st.title("📄 AI Document Assistant (Upload + Chat)")
 
-# 🔹 Title
-st.title("📄 AI Document Assistant (FastAPI + RAG)")
-st.write("Ask questions about your document")
+# 🔹 Upload PDF
+uploaded_file = st.file_uploader("Upload your PDF", type="pdf")
 
-# 🔹 Initialize chat history
+if uploaded_file:
+    with st.spinner("Uploading and processing..."):
+        try:
+            files = {
+                "file": (
+                    uploaded_file.name,
+                    uploaded_file.getvalue(),
+                    "application/pdf"
+                )
+            }
+
+            res = requests.post(UPLOAD_URL, files=files)
+
+            if res.status_code == 200:
+                st.success("✅ PDF uploaded successfully")
+            else:
+                st.error("❌ Upload failed")
+
+        except Exception as e:
+            st.error(f"Upload error: {e}")
+
+# 🔹 Chat memory
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 🔹 Display chat history
+# 🔹 Display chat
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 🔹 Chat input
-query = st.chat_input("Ask a question...")
+# 🔹 Input
+user_input = st.chat_input("Ask a question about your PDF...")
 
-# 🔹 When user sends message
-if query:
-
-    # Save user message
-    st.session_state.messages.append({"role": "user", "content": query})
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
     with st.chat_message("user"):
-        st.markdown(query)
+        st.markdown(user_input)
 
     with st.chat_message("assistant"):
-        with st.spinner("🔍 Generating answer... Please wait"):
-
+        with st.spinner("Thinking..."):
             try:
                 response = requests.post(
                     API_URL,
-                    json={"question": query},
+                    json={"question": user_input},
                     timeout=60
                 )
 
-                # 🔹 Debug info
-                st.caption(f"Status Code: {response.status_code}")
+                if response.status_code == 200:
+                    data = response.json()
+                    answer = data.get("answer", "No answer")
 
-                if response.status_code != 200:
-                    error_msg = "❌ Backend returned error"
-                    st.error(error_msg)
-                    st.write(response.text)
+                    st.markdown(answer)
 
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": error_msg
-                    })
-                    st.stop()
+                    sources = data.get("sources", [])
+                    if sources:
+                        st.markdown(
+                            "**📚 Sources:** " + ", ".join([f"Page {p}" for p in sources])
+                        )
 
-                data = response.json()
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": answer}
+                    )
 
-                answer = data.get("answer", "No answer found")
-
-                # 🔹 Show answer
-                st.markdown(answer)
-
-                # 🔹 Show sources
-                sources = data.get("sources", [])
-                if sources:
-                    st.markdown("**📚 Sources:** " + ", ".join([f"Page {p}" for p in sources]))
-
-                # 🔹 Save assistant response
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": answer
-                })
-
-            except requests.exceptions.ConnectionError:
-                error_msg = "❌ Cannot connect to backend"
-                st.error(error_msg)
-                st.info("👉 Check if Render service is running")
-
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": error_msg
-                })
-
-            except requests.exceptions.Timeout:
-                error_msg = "⏳ Request timed out"
-                st.error(error_msg)
-                st.info("👉 First request may take ~1 min (Render cold start). Try again")
-
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": error_msg
-                })
+                else:
+                    st.error("Backend error")
 
             except Exception as e:
-                error_msg = f"⚠️ Unexpected Error: {e}"
-                st.error(error_msg)
-
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": error_msg
-                })
+                st.error(str(e))

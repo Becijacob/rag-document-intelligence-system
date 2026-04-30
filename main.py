@@ -1,20 +1,20 @@
 import os
-from fastapi import FastAPI
+import shutil
+from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
-from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
-# 🔹 Load env variables
 load_dotenv()
 
 app = FastAPI()
 
-# 🔹 Enable CORS
+# ✅ CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,140 +23,91 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔹 Request schema
-class QueryRequest(BaseModel):
-    question: str
-
-# 🔹 Global objects
+# 🔹 Globals
 vectordb = None
 retriever = None
 llm = None
 
-# 🔹 Root endpoint
+UPLOAD_PATH = "uploaded.pdf"
+
+class QueryRequest(BaseModel):
+    question: str
+
+# ✅ Root
 @app.get("/")
 def home():
-    return {"message": "FastAPI RAG service is running"}
+    return {"message": "RAG API running"}
 
-# 🔹 Debug endpoint
-@app.get("/check")
-def check_key():
-    key = os.getenv("OPENAI_API_KEY")
-    return {
-        "key_present": key is not None,
-        "key_length": len(key) if key else 0
-    }
-
-# 🔹 Startup loader
-@app.on_event("startup")
-def load_data():
+# ✅ Upload PDF
+@app.post("/upload")
+async def upload_pdf(file: UploadFile = File(...)):
     global vectordb, retriever, llm
 
     try:
-        print("🚀 Starting backend setup...")
+        # Save file
+        with open(UPLOAD_PATH, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-        # ✅ Check API Key
-        if not os.getenv("OPENAI_API_KEY"):
-            raise ValueError("❌ OPENAI_API_KEY is missing in environment")
-
-        # ✅ Initialize LLM
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-
-        # ✅ Load PDF
-        # pdf_path = "Cloud-Based Data Processing System Architecture.pdf"
-
-        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-        pdf_path = os.path.join(
-            BASE_DIR,
-            "Cloud_Based.pdf"
-        )
-
-        print("📂 Loading PDF from:", pdf_path)
-
-        loader = PyPDFLoader(pdf_path)
-
-
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"❌ PDF not found: {pdf_path}")
-
-        loader = PyPDFLoader(pdf_path)
+        # Load PDF
+        loader = PyPDFLoader(UPLOAD_PATH)
         documents = loader.load()
 
-        # ✅ Split documents
+        # Split
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=300,
             chunk_overlap=80
         )
         docs = splitter.split_documents(documents)
 
-        # ✅ Create embeddings + vector DB
+        # Create embeddings
         embedding = OpenAIEmbeddings()
         vectordb = Chroma.from_documents(docs, embedding)
 
-        # ✅ Create retriever
-        retriever = vectordb.as_retriever(search_kwargs={"k": 8})
+        retriever = vectordb.as_retriever(search_kwargs={"k": 10})
 
-        print("✅ PDF loaded and vector DB ready")
+        # Initialize LLM
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ValueError("API key missing")
+
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+        return {"message": "PDF uploaded and processed"}
 
     except Exception as e:
-        print("❌ Startup Error:", str(e))
-        retriever = None
-        llm = None
+        return {"error": str(e)}
 
-# 🔹 Main API
+# ✅ Ask question
 @app.post("/ask")
 def ask_question(req: QueryRequest):
     global retriever, llm
 
     try:
-        # ✅ Safety checks
         if retriever is None:
-            return {"error": "Retriever not initialized. Check PDF loading."}
+            return {"error": "Upload a PDF first"}
 
         if llm is None:
-            return {"error": "LLM not initialized. Check API key."}
+            return {"error": "LLM not initialized"}
 
-        # 🔥 Multi-query retrieval
-        queries = [
-            req.question,
-            "Explain system architecture",
-            "What are challenges in the system?",
-            "Explain all components"
-        ]
+        docs = retriever.invoke(req.question)
 
-        all_docs = []
+        context = "\n".join([doc.page_content for doc in docs])
 
-        for q in queries:
-            docs = retriever.invoke(q)
-            all_docs.extend(docs)
-
-        # ✅ Remove duplicates
-        unique_docs = list({doc.page_content: doc for doc in all_docs}.values())
-
-        context = "\n".join([doc.page_content for doc in unique_docs])
-
-        # 🔥 Prompt
         prompt = f"""
-        You are a senior system architect.
+You are an AI assistant.
 
-        Answer ONLY using the provided context.
-        Do NOT add external knowledge.
-        Structure the answer using clear headings and bullet points.
+Answer ONLY using the context.
+If answer not found, say "I don't know".
 
-        If not found, say:
-        "I don't know based on the document."
+Context:
+{context}
 
-        Context:
-        {context}
-
-        Question:
-        {req.question}
-        """
+Question:
+{req.question}
+"""
 
         response = llm.invoke(prompt)
 
-        # ✅ Sources
-        pages = list(set([doc.metadata.get("page", 0) + 1 for doc in unique_docs]))
+        pages = list(set([doc.metadata.get("page", 0) + 1 for doc in docs]))
 
         return {
             "answer": response.content,
