@@ -4,52 +4,60 @@ import requests
 # 🔹 Page config
 st.set_page_config(page_title="AI Document Assistant", layout="wide")
 
+# 🔹 Backend URL (IMPORTANT → replace if needed)
+API_URL = "https://rag-backend.onrender.com/ask"
+
 # 🔹 Title
 st.title("📄 AI Document Assistant (FastAPI + RAG)")
 st.write("Ask questions about your document")
 
-# 🔹 Input box
+# 🔹 Input
 query = st.text_input("Ask a question")
 
-# 🔹 Button (optional but useful)
-ask_button = st.button("Ask")
+# 🔹 Button
+if st.button("Ask"):
 
-# 🔹 Trigger on button OR enter
-if query and ask_button:
+    if not query:
+        st.warning("⚠️ Please enter a question")
+        st.stop()
 
     with st.spinner("🔍 Generating answer... Please wait"):
+
         try:
-            # 🔥 Call FastAPI backend
             response = requests.post(
-                "https://rag-backend.onrender.com/ask",
+                API_URL,
                 json={"question": query},
-                timeout=30
+                timeout=60   # ⬅️ increased timeout (Render is slow first time)
             )
 
-            # 🔹 Check response status
+            # 🔹 Debug info (VERY IMPORTANT)
+            st.caption(f"Status Code: {response.status_code}")
+
             if response.status_code != 200:
-                st.error("❌ API Error. Please check backend.")
-            else:
-                result = response.json()
+                st.error("❌ Backend returned error")
+                st.write(response.text)   # show real error
+                st.stop()
 
-                # 🔹 Display answer
-                st.markdown("### ✅ Answer")
-                st.write(result.get("answer", "No answer found"))
+            data = response.json()
 
-                st.divider()
+            # 🔹 Show answer
+            st.markdown("### ✅ Answer")
+            st.write(data.get("answer", "No answer found"))
 
-                # 🔹 Display sources
+            # 🔹 Show sources (if available)
+            sources = data.get("sources", [])
+
+            if sources:
                 st.markdown("### 📚 Sources")
-                sources = result.get("sources", [])
-
-                if sources:
-                    st.write(", ".join([f"Page {p}" for p in sources]))
-                else:
-                    st.write("No sources found")
+                st.write(", ".join([f"Page {p}" for p in sources]))
 
         except requests.exceptions.ConnectionError:
-            st.error("❌ Cannot connect to FastAPI backend. Is it running?")
+            st.error("❌ Cannot connect to backend")
+            st.info("👉 Check if Render service is running")
+
         except requests.exceptions.Timeout:
-            st.error("⏳ Request timed out. Try again.")
+            st.error("⏳ Request timed out")
+            st.info("👉 First request may take ~1 min (Render cold start). Try again")
+
         except Exception as e:
-            st.error(f"⚠️ Error: {e}")
+            st.error(f"⚠️ Unexpected Error: {e}")
