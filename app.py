@@ -5,7 +5,7 @@ import requests
 st.set_page_config(page_title="AI Document Assistant", layout="wide")
 
 # 🔹 Backend URL (IMPORTANT → replace if needed)
-API_URL = "https://rag-backend.onrender.com/ask"
+API_URL = "https://rag-document-intelligence-system.onrender.com/ask"
 
 # 🔹 Title
 st.title("📄 AI Document Assistant (FastAPI + RAG)")
