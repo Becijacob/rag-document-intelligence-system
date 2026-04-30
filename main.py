@@ -1,5 +1,7 @@
 import os
 import shutil
+from typing import List
+
 from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,62 +30,71 @@ vectordb = None
 retriever = None
 llm = None
 
-UPLOAD_PATH = "uploaded.pdf"
-
 class QueryRequest(BaseModel):
     question: str
 
 # ✅ Root
 @app.get("/")
 def home():
-    return {"message": "RAG API running"}
+    return {"message": "Multi-PDF RAG API running"}
 
-# ✅ Upload PDF
+# ✅ Upload MULTIPLE PDFs
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdfs(files: List[UploadFile] = File(...)):
     global vectordb, retriever, llm
 
     try:
-        # Save file
-        with open(UPLOAD_PATH, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        all_docs = []
 
-        # Load PDF
-        loader = PyPDFLoader(UPLOAD_PATH)
-        documents = loader.load()
+        for file in files:
+            file_path = f"/tmp/{file.filename}"
+
+            # Save file
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            # Load PDF
+            loader = PyPDFLoader(file_path)
+            documents = loader.load()
+
+            # Add metadata (important)
+            for doc in documents:
+                doc.metadata["source"] = file.filename
+
+            all_docs.extend(documents)
 
         # Split
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=300,
             chunk_overlap=80
         )
-        docs = splitter.split_documents(documents)
+        docs = splitter.split_documents(all_docs)
 
-        # Create embeddings
+        # Embeddings + DB
         embedding = OpenAIEmbeddings()
         vectordb = Chroma.from_documents(docs, embedding)
 
         retriever = vectordb.as_retriever(search_kwargs={"k": 10})
 
-        # Initialize LLM
+        # LLM
         if not os.getenv("OPENAI_API_KEY"):
-            raise ValueError("API key missing")
+            raise ValueError("OPENAI_API_KEY missing")
 
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-        return {"message": "PDF uploaded and processed"}
+        return {"message": f"{len(files)} PDFs uploaded successfully"}
 
     except Exception as e:
         return {"error": str(e)}
 
-# ✅ Ask question
+# ✅ Ask
 @app.post("/ask")
 def ask_question(req: QueryRequest):
     global retriever, llm
 
     try:
         if retriever is None:
-            return {"error": "Upload a PDF first"}
+            return {"error": "Upload PDFs first"}
 
         if llm is None:
             return {"error": "LLM not initialized"}
@@ -107,11 +118,13 @@ Question:
 
         response = llm.invoke(prompt)
 
+        sources = list(set([doc.metadata.get("source", "Unknown") for doc in docs]))
         pages = list(set([doc.metadata.get("page", 0) + 1 for doc in docs]))
 
         return {
             "answer": response.content,
-            "sources": sorted(pages)
+            "sources": sources,
+            "pages": sorted(pages)
         }
 
     except Exception as e:

@@ -5,28 +5,29 @@ import requests
 API_URL = "https://rag-document-intelligence-system.onrender.com/ask"
 UPLOAD_URL = "https://rag-document-intelligence-system.onrender.com/upload"
 
-st.set_page_config(page_title="AI Document Assistant", layout="wide")
+st.set_page_config(page_title="AI Multi-Document Assistant", layout="wide")
 
-st.title("📄 AI Document Assistant (Upload + Chat)")
+st.title("📄 AI Multi-Document Assistant")
 
-# 🔹 Upload PDF
-uploaded_file = st.file_uploader("Upload your PDF", type="pdf")
+# 🔹 Upload multiple PDFs
+uploaded_files = st.file_uploader(
+    "Upload one or more PDFs",
+    type="pdf",
+    accept_multiple_files=True
+)
 
-if uploaded_file:
-    with st.spinner("Uploading and processing..."):
+if uploaded_files:
+    with st.spinner("Processing PDFs..."):
         try:
-            files = {
-                "file": (
-                    uploaded_file.name,
-                    uploaded_file.getvalue(),
-                    "application/pdf"
-                )
-            }
+            files = [
+                ("files", (file.name, file.getvalue(), "application/pdf"))
+                for file in uploaded_files
+            ]
 
             res = requests.post(UPLOAD_URL, files=files)
 
             if res.status_code == 200:
-                st.success("✅ PDF uploaded successfully")
+                st.success("✅ PDFs uploaded successfully")
             else:
                 st.error("❌ Upload failed")
 
@@ -43,7 +44,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # 🔹 Input
-user_input = st.chat_input("Ask a question about your PDF...")
+user_input = st.chat_input("Ask across all uploaded PDFs...")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -62,15 +63,18 @@ if user_input:
 
                 if response.status_code == 200:
                     data = response.json()
-                    answer = data.get("answer", "No answer")
 
+                    answer = data.get("answer", "No answer found")
                     st.markdown(answer)
 
                     sources = data.get("sources", [])
+                    pages = data.get("pages", [])
+
                     if sources:
-                        st.markdown(
-                            "**📚 Sources:** " + ", ".join([f"Page {p}" for p in sources])
-                        )
+                        st.markdown("**📄 Documents:** " + ", ".join(sources))
+
+                    if pages:
+                        st.markdown("**📚 Pages:** " + ", ".join(map(str, pages)))
 
                     st.session_state.messages.append(
                         {"role": "assistant", "content": answer}
