@@ -62,7 +62,19 @@ def load_data():
         llm = ChatOpenAI(model="gpt-4o-mini")
 
         # ✅ Load PDF
-        pdf_path = "Cloud-Based Data Processing System Architecture.pdf"
+        # pdf_path = "Cloud-Based Data Processing System Architecture.pdf"
+
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+        pdf_path = os.path.join(
+            BASE_DIR,
+            "Cloud-Based Data Processing System Architecture.pdf"
+        )
+
+        print("📂 Loading PDF from:", pdf_path)
+
+        loader = PyPDFLoader(pdf_path)
+
 
         if not os.path.exists(pdf_path):
             raise FileNotFoundError(f"❌ PDF not found: {pdf_path}")
