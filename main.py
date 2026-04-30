@@ -59,7 +59,7 @@ def load_data():
             raise ValueError("❌ OPENAI_API_KEY is missing in environment")
 
         # ✅ Initialize LLM
-        llm = ChatOpenAI(model="gpt-4o-mini")
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
         # ✅ Load PDF
         # pdf_path = "Cloud-Based Data Processing System Architecture.pdf"
